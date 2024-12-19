@@ -1,7 +1,7 @@
 // API endpoints and configuration
 export const API_CONFIG = {
   SOCKET_URL: import.meta.env.PROD 
-    ? 'https://stirring-seahorse-fd43e9.netlify.app/'
+    ? 'https://rt-voice.netlify.app'
     : 'http://localhost:3000',
   RECONNECTION_ATTEMPTS: 5,
   RECONNECTION_DELAY: 1000,
