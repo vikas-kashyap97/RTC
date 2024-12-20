@@ -1,7 +1,7 @@
 // API endpoints and configuration
 export const API_CONFIG = {
   SOCKET_URL: import.meta.env.PROD 
-    ? 'https://rtc-l2n1.onrender.com/'
+    ? 'https://rtc-6xcw.onrender.com'
     : 'http://localhost:3000',
   RECONNECTION_ATTEMPTS: 5,
   RECONNECTION_DELAY: 1000,
