@@ -9,7 +9,7 @@ const httpServer = createServer(app);
 // Configure CORS for both Express and Socket.IO
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://rt-voice.netlify.app']
+    ? ['https://rt-voice.netlify.app/']
     : ['http://localhost:5173'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
