@@ -1,7 +1,7 @@
 // API endpoints and configuration
 export const API_CONFIG = {
   SOCKET_URL: import.meta.env.PROD 
-    ? 'https://rtc-6xcw.onrender.com'
+    ? 'https://api.render.com/deploy/srv-ctijbh5umphs73f3cs30?key=phCHpti_PGA'
     : 'http://localhost:3000',
   RECONNECTION_ATTEMPTS: 5,
   RECONNECTION_DELAY: 1000,
