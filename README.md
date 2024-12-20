@@ -48,7 +48,7 @@ Ensure that **Node.js** and **npm** are installed on your machine.
     ```env
     PORT=3000
     NODE_ENV=development
-    SOCKET_URL=https://rtc-6xcw.onrender.com
+    SOCKET_URL=YOUR_RENDER_LINK
     ```
 
 5. **Start the server**:
