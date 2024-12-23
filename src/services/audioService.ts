@@ -6,154 +6,176 @@ import type { VoiceEffect } from '../types/audio';
 class AudioService {
   private initialized: boolean = false;
   private context: AudioContext | null = null;
-  private currentStream: MediaStream | null = null;
-  private deviceId: string | null = null;
-
-  // Add method to check available devices
-  async checkAudioDevices(): Promise<boolean> {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioDevices = devices.filter(device => device.kind === 'audioinput');
-      
-      if (audioDevices.length === 0) {
-        console.error('No audio input devices found');
-        return false;
-      }
-
-      // Store the first available device ID
-      this.deviceId = audioDevices[0].deviceId;
-      console.log('Available audio devices:', audioDevices.length);
-      return true;
-    } catch (error) {
-      console.error('Error checking audio devices:', error);
-      return false;
-    }
-  }
+  private stream: MediaStream | null = null;
+  private peerConnection: RTCPeerConnection | null = null;
 
   async initialize() {
     if (this.initialized) return;
 
     try {
-      // Check for audio devices first
-      const hasAudioDevices = await this.checkAudioDevices();
-      if (!hasAudioDevices) {
-        throw new Error('No audio input devices available');
-      }
-
       // Initialize audio context
       this.context = new AudioContext({
-        sampleRate: AUDIO_CONFIG.SAMPLE_RATE,
+        sampleRate: AUDIO_CONFIG.SAMPLE_RATE || 44100,
         latencyHint: 'interactive'
       });
 
-      // Initialize Tone.js
-      await Tone.start();
-      Tone.setContext(this.context);
+      // Get user media with optimal constraints
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 2,
+          sampleRate: AUDIO_CONFIG.SAMPLE_RATE || 44100,
+          latency: 0
+        }
+      });
+
+      // Add audio tracks to peer connection
+      if (this.stream) {
+        this.stream.getAudioTracks().forEach(track => {
+          if (this.peerConnection) {
+            this.peerConnection.addTrack(track, this.stream!);
+          }
+        });
+      }
 
       this.initialized = true;
       console.log('Audio system initialized successfully');
     } catch (error) {
       console.error('Failed to initialize audio:', error);
-      throw new Error(`Audio initialization failed: ${error.message}`);
+      throw error;
     }
   }
 
-  async getUserMedia() {
+  setupPeerConnection(configuration: RTCConfiguration) {
     try {
-      if (!this.initialized) {
-        await this.initialize();
-      }
-
-      // Check if we have permission to access the microphone
-      const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-      if (permission.state === 'denied') {
-        throw new Error('Microphone permission denied');
-      }
-
-      // Try to get the audio stream with specific constraints
-      const constraints: MediaStreamConstraints = {
-        audio: {
-          deviceId: this.deviceId ? { exact: this.deviceId } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: AUDIO_CONFIG.CHANNELS,
-          sampleRate: { ideal: AUDIO_CONFIG.SAMPLE_RATE }
-        }
-      };
-
-      // Attempt to get the stream with specific constraints
-      try {
-        this.currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (error) {
-        // If failed with specific constraints, try with basic audio constraints
-        console.warn('Failed to get stream with specific constraints, trying basic audio');
-        this.currentStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: true 
+      this.peerConnection = new RTCPeerConnection(configuration);
+      
+      // Add existing audio tracks if stream exists
+      if (this.stream) {
+        this.stream.getAudioTracks().forEach(track => {
+          this.peerConnection?.addTrack(track, this.stream!);
         });
       }
 
-      if (!this.currentStream) {
-        throw new Error('Failed to get audio stream');
-      }
+      // Handle incoming tracks
+      this.peerConnection.ontrack = (event) => {
+        console.log('Received remote track:', event.track.kind);
+        // Play remote audio
+        const remoteStream = new MediaStream([event.track]);
+        const audioElement = new Audio();
+        audioElement.srcObject = remoteStream;
+        audioElement.play().catch(console.error);
+      };
 
-      // Verify that we actually got audio tracks
-      const audioTracks = this.currentStream.getAudioTracks();
-      if (audioTracks.length === 0) {
-        throw new Error('No audio tracks found in the media stream');
-      }
+      // Log connection state changes
+      this.peerConnection.onconnectionstatechange = () => {
+        console.log('Connection state:', this.peerConnection?.connectionState);
+      };
 
-      console.log('Audio input stream acquired successfully');
-      return this.currentStream;
+      // Log ICE connection state changes
+      this.peerConnection.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', this.peerConnection?.iceConnectionState);
+      };
 
+      return this.peerConnection;
     } catch (error) {
-      console.error('Failed to get user media:', error);
-      throw new Error(`Failed to access microphone: ${error.message}`);
+      console.error('Error setting up peer connection:', error);
+      throw error;
     }
   }
 
-  // Add method to handle device changes
-  async handleDeviceChange() {
+  async createOffer(): Promise<RTCSessionDescriptionInit> {
+    if (!this.peerConnection) {
+      throw new Error('Peer connection not initialized');
+    }
+
     try {
-      await this.checkAudioDevices();
-      // If we have an active stream, restart it with the new device
-      if (this.currentStream) {
-        this.cleanup();
-        await this.getUserMedia();
-      }
+      const offer = await this.peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false
+      });
+      
+      await this.peerConnection.setLocalDescription(offer);
+      return offer;
     } catch (error) {
-      console.error('Error handling device change:', error);
+      console.error('Error creating offer:', error);
+      throw error;
     }
   }
 
-  // Rest of the AudioService implementation...
+  async handleAnswer(answer: RTCSessionDescriptionInit) {
+    if (!this.peerConnection) {
+      throw new Error('Peer connection not initialized');
+    }
+
+    try {
+      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    } catch (error) {
+      console.error('Error handling answer:', error);
+      throw error;
+    }
+  }
+
+  async handleIceCandidate(candidate: RTCIceCandidateInit) {
+    if (!this.peerConnection) {
+      throw new Error('Peer connection not initialized');
+    }
+
+    try {
+      await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.error('Error handling ICE candidate:', error);
+      throw error;
+    }
+  }
+
+  // Add method to check audio levels
+  startAudioLevelMonitoring() {
+    if (!this.context || !this.stream) return;
+
+    const audioContext = this.context;
+    const source = audioContext.createMediaStreamSource(this.stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+
+    source.connect(analyser);
+    
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const checkLevel = () => {
+      analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+      console.log('Audio input level:', average);
+      requestAnimationFrame(checkLevel);
+    };
+
+    checkLevel();
+  }
 
   cleanup() {
-    try {
-      // Stop all tracks in the current stream
-      if (this.currentStream) {
-        this.currentStream.getTracks().forEach(track => track.stop());
-        this.currentStream = null;
-      }
+    // Stop all tracks
+    this.stream?.getAudioTracks().forEach(track => {
+      track.stop();
+    });
 
-      // Close audio context
-      if (this.context) {
-        this.context.close();
-        this.context = null;
-      }
-
-      this.initialized = false;
-      this.deviceId = null;
-      console.log('Audio system cleaned up successfully');
-    } catch (error) {
-      console.error('Error during cleanup:', error);
+    // Close peer connection
+    if (this.peerConnection) {
+      this.peerConnection.close();
+      this.peerConnection = null;
     }
+
+    // Close audio context
+    if (this.context) {
+      this.context.close();
+      this.context = null;
+    }
+
+    this.stream = null;
+    this.initialized = false;
   }
 }
-
-// Add device change listener
-navigator.mediaDevices.addEventListener('devicechange', async () => {
-  await audioService.handleDeviceChange();
-});
 
 export const audioService = new AudioService();
